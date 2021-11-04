@@ -1,0 +1,86 @@
+#~########################~#
+##### PRE-PROCESSING #######
+#~########################~#
+
+#fastq files should have R1 & R2 designations for PE reads
+#Also - some pre-trimming. Retain only PE reads that match amplicon primer. Remove reads containing Illumina sequencing adapters
+
+##in Terminal home directory:
+##following instructions of installing BBtools from https://jgi.doe.gov/data-and-tools/bbtools/bb-tools-user-guide/installation-guide/
+##1. download BBMap package, sftp to installation directory
+##2. untar: 
+#tar -xvzf BBMap_(version).tar.gz
+##3. test package:
+#cd bbmap
+#~/bin/bbmap/stats.sh in=~/bin/bbmap/resources/phix174_ill.ref.fa.gz
+
+## my adaptors, which I saved as "adaptors.fasta"
+# >forward
+# AATGATACGGCGACCAC
+# >forwardrc
+# GTGGTCGCCGTATCATT
+# >reverse
+# CAAGCAGAAGACGGCATAC
+# >reverserc
+# GTATGCCGTCTTCTGCTTG
+
+##Note: Illumina should have cut these out already, normal if you don't get any
+
+##primers for ITS:
+# >forward
+# GTGAATTGCAGAACTCCGTG
+# >reverse
+# CCTCCGCTTACTTATATGCTT
+
+##Still in terminal - making a sample list based on the first phrase before the underscore in the .fastq name
+#ls *R1_001.fastq | cut -d '_' -f1,2,3 > samples.txt
+
+#rename files
+#for file in $(cat samples.list); do  mv ${file}_*R1*.fastq ${file}_R1.fastq; mv ${file}_*R2*.fastq ${file}_R2.fastq; done 
+
+
+##gets rid of reads that still have the adaptor sequence, shouldn't be there
+#for file in $(cat samples.list); do bbmap/bbduk.sh in1=${file}_R1.fastq in2=${file}_R2.fastq ref=adaptors.fasta out1=${file}_R1_NoIll.fastq out2=${file}_R2_NoIll.fastq; done &>bbduk_NoIll.log
+
+
+##only keeping reads that start with the 16S primer
+#for file in $(cat samples.list); do bbmap/bbduk.sh in1=${file}_R1_NoIll.fastq in2=${file}_R2_NoIll.fastq restrictleft=20 k=10 \
+#literal=GTGYCAGCMGCCGCGGTA,GGACTACHVGGGTWTCTAAT copyundefined=t outm1=${file}_R1_NoIll_16S.fastq outu1=${file}_R1_check.fastq outm2=${file}_R2_NoIll_16S.fastq outu2=${file}_R2_check.fastq; done &>bbduk_No16S.log
+
+
+##higher k = more reads removed, but can't surpass k=20 or 21
+#kmer length used to find kmers matching 'ref' 
+#^why filter out k=10 when primers are 18? 
+
+##only keeping reads that start with the ITS primer
+for file in $(cat samples.list); do bbmap/bbduk.sh in1=${file}_R1_NoIll.fastq in2=${file}_R2_NoIll.fastq k=15 \
+restrictleft=21 literal=GTGAATTGCAGAACTCCGTG,CCTCCGCTTACTTATATGCTT outm1=${file}_R1_NoIll_ITS.fastq outu1=${file}_R1_check.fastq \
+outm2=${file}_R2_NoIll_ITS.fastq outu2=${file}_R2_check.fastq; done &>bbduk_ITS.log
+##higher k = more reads removed, but can't surpass k=20 or 21
+
+
+
+
+
+
+
+##using cutadapt to remove adapters & reads with Ns in them
+module load cutadapt 
+for file in $(cat samples.list); do
+cutadapt -g GTGYCAGCMGCCGCGGTA -G GGACTACHVGGGTWTCTAAT -A TACCGCGGCKGCTGRCAC -a ATTAGAWACCCBDGTAGTCC \
+-n 2 -o ${file}_R1.fastq -p ${file}_R2.fastq --max-n 0 ${file}_R1_NoIll_16S.fastq ${file}_R2_NoIll_16S.fastq;
+done &> clip.log
+##-g regular 5' forward primer 
+##-G regular 5' reverse primer
+##-A FWD.RC
+##-a REV.RC
+##-o forward out
+##-p reverse out
+##-max-n 0 means 0 Ns allowed
+##-n 2 means multiple adapters can be removed from a read 
+##GTGYCAGCMGCCGCGGTA
+##GGACTACHVGGGTWTCTAAT
+##TACCGCGGCKGCTGRCAC
+##ATTAGAWACCCBDGTAGTCC
+
+##sftp of *_R1.fastq & *_R2.fastq files to the folder to be used in dada2
